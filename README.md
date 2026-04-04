@@ -1,6 +1,7 @@
 # SmartFarm ESP32 Firmware v1.0.0
 
 Firmware สำหรับ ESP32 ที่ทำหน้าที่อ่านค่า Sensor, ควบคุม Relay และส่งข้อมูลผ่าน MQTT  
+รองรับ Water Temperature, Air Temperature/Humidity, Water Overflow, Water Dry และ Relay Control  
 เอกสารนี้ครอบคลุมทุกรายละเอียดเพื่อใช้เป็นแนวทางสร้าง **Django SmartFarm Dashboard**
 
 ---
@@ -75,6 +76,8 @@ esp32-firmwareV_1/
 | GPIO 17 | Relay 1 | Water Pump | Active LOW |
 | GPIO 16 | Relay 2 | Fan / Ventilation | Active LOW |
 | GPIO 4 | Relay 3 | Heater | Active LOW |
+| GPIO 33 | Level Overflow | Water Overflow Sensor | Active LOW via opto isolate |
+| GPIO 27 | Level Dry | Water Dry Sensor | Active LOW via opto isolate |
 | GPIO 21 | I2C SDA | OLED SSD1306 | I2C address 0x3C |
 | GPIO 22 | I2C SCL | OLED SSD1306 | I2C address 0x3C |
 
@@ -95,6 +98,9 @@ ESP32
 ├── GPIO16 ────────── Relay Module IN2 (Fan)
 ├── GPIO4  ────────── Relay Module IN3 (Heater)
 │   (Relay Module: Active LOW with optocoupler)
+│
+├── GPIO33 ────────── Water Overflow Sensor (Opto Isolate, Active LOW)
+├── GPIO27 ────────── Water Dry Sensor (Opto Isolate, Active LOW)
 │
 ├── GPIO21 (SDA) ──── OLED SSD1306 SDA
 └── GPIO22 (SCL) ──── OLED SSD1306 SCL
@@ -133,21 +139,33 @@ ESP32
 | 0x0001 | Temperature × 10 | หาร 10 = °C | `sensors.air_temp` |
 | 0x0002 | Humidity × 10 | หาร 10 = % | `sensors.air_humidity` |
 
-### 3.3 SensorData Struct (C++)
+### 3.3 Water Level Sensors — Overflow / Dry
+
+| Sensor | GPIO | Logic | Field ใน payload | ความหมายเมื่อเป็น `true` |
+|---|---|---|---|---|
+| Water Overflow | 33 | Active LOW ผ่าน opto isolate | `sensors.water_overflow` | ระดับน้ำถึงจุดล้น |
+| Water Dry | 27 | Active LOW ผ่าน opto isolate | `sensors.water_dry` | น้ำแห้ง / ต่ำกว่าจุดกำหนด |
+
+- ค่า 2 field นี้ถูกอ่านทุกครั้งที่ `sensorsRead()` และถูกส่งใน Telemetry ทุกครั้ง
+- เป็น boolean state จึงมี field ใน payload เสมอ ต่างจากค่า temperature/humidity ที่อาจหายไปเมื่อ sensor invalid
+
+### 3.4 SensorData Struct (C++)
 
 ```cpp
 struct SensorData {
     float waterTemp;         // DS18B20 (°C)
     float airTemp;           // XY-MD03 (°C)
     float airHumidity;       // XY-MD03 (%)
+  bool  waterOverflow;     // true = น้ำล้น
+  bool  waterDry;          // true = น้ำแห้ง
     bool  waterTempValid;    // false = sensor error / disconnected
     bool  airTempValid;      // false = Modbus read failed
     bool  airHumidityValid;  // false = Modbus read failed
 };
 ```
 
-> **สำคัญ:** fields ใน `sensors` ของ MQTT payload **อาจไม่มี key** ถ้า sensor นั้น invalid  
-> ใน Python ต้องใช้ `payload.get("sensors", {}).get("water_temp")` เสมอ
+> **สำคัญ:** field กลุ่ม temperature/humidity ใน `sensors` ของ MQTT payload **อาจไม่มี key** ถ้า sensor นั้น invalid  
+> แต่ `sensors.water_overflow` และ `sensors.water_dry` จะถูกส่งเสมอเพราะเป็น digital input
 
 ---
 
@@ -194,7 +212,7 @@ mqttConnect()   → connect + subscribe + publish "online"
 |---|---|
 | Broker | `broker.hivemq.com` |
 | Port | `1883` (TCP, ไม่มี TLS) |
-| Client ID | `ESP32-FARM-001` (= BOARD_ID) |
+| Client ID | `BOARD_ID` จาก `include/config.h` |
 | Username / Password | ไม่มี (Public Free Broker) |
 | Keep Alive | 60 วินาที |
 | Buffer Size | 512 bytes |
@@ -219,7 +237,7 @@ Publisher ──► Broker ──► Subscriber
 - Overhead ต่ำที่สุด — เหมาะกับข้อมูลที่ส่งบ่อยและรับค่าใหม่ได้อยู่แล้ว
 
 **ใช้กับโปรเจกต์นี้:** `smartfarm/{id}/telemetry`
-→ ส่งทุก 10 วินาที ถ้าหายไป 1 รอบก็ไม่เป็นไร รอบถัดไปมาแทนได้
+→ ส่งทุก 5 วินาที ถ้าหายไป 1 รอบก็ไม่เป็นไร รอบถัดไปมาแทนได้
 
 ---
 
@@ -274,11 +292,11 @@ Publisher ──► PUBCOMP ──► Broker ──► Subscriber
 
 เมื่อ board หลุดโดยไม่ตั้งใจ (ไฟดับ, reset, หลุด WiFi) broker จะ publish อัตโนมัติ:
 
-**Topic:** `smartfarm/ESP32-FARM-001/status`
+**Topic:** `smartfarm/{BOARD_ID}/status`
 
 ```json
 {
-  "board_id": "ESP32-FARM-001",
+  "board_id": "ESP32-FARM-001-NATTAPHOL-PALM",
   "status": "offline",
   "timestamp": 123456
 }
@@ -295,12 +313,12 @@ Publisher ──► PUBCOMP ──► Broker ──► Subscriber
 ```
 Backend / Dashboard
     │
-    ├─── subscribe ──► smartfarm/+/telemetry   (รับค่า sensor + relay state)
+    ├─── subscribe ──► smartfarm/+/telemetry   (รับค่า sensor + water level + relay state)
     ├─── subscribe ──► smartfarm/+/status      (รับสถานะ online/offline)
     └─── publish  ──► smartfarm/{id}/control   (ส่งคำสั่งควบคุม)
 
 ESP32
-    ├─── publish  ──► telemetry  (ทุก 10 วิ + ทันทีหลัง relay_control)
+    ├─── publish  ──► telemetry  (ทุก 5 วิ + ทันทีหลัง relay_control)
     ├─── publish  ──► status     (ทุก 30 วิ + ตอน connect/disconnect + LWT)
     └─── subscribe ──► control   (รอรับคำสั่งตลอดเวลา)
 ```
@@ -308,16 +326,16 @@ ESP32
 ### Topic Pattern
 
 ```
-smartfarm/{board_id}/telemetry   ← ESP32 → Dashboard  (publish ทุก 10s)
+smartfarm/{board_id}/telemetry   ← ESP32 → Dashboard  (publish ทุก 5s)
 smartfarm/{board_id}/status      ← ESP32 → Dashboard  (publish ทุก 30s, retained)
 smartfarm/{board_id}/control     ← Dashboard → ESP32  (ESP32 subscribe)
 ```
 
-ตัวอย่างสำหรับ `BOARD_ID = "ESP32-FARM-001"`:
+ตัวอย่างจาก config ปัจจุบัน (`BOARD_ID = "ESP32-FARM-001-NATTAPHOL-PALM"`):
 ```
-smartfarm/ESP32-FARM-001/telemetry
-smartfarm/ESP32-FARM-001/status
-smartfarm/ESP32-FARM-001/control
+smartfarm/ESP32-FARM-001-NATTAPHOL-PALM/telemetry
+smartfarm/ESP32-FARM-001-NATTAPHOL-PALM/status
+smartfarm/ESP32-FARM-001-NATTAPHOL-PALM/control
 ```
 
 Subscribe ทุก board พร้อมกัน (Django):
@@ -326,11 +344,23 @@ smartfarm/+/telemetry
 smartfarm/+/status
 ```
 
+ตัวอย่างการ subscribe/publish แบบเจาะจง:
+```
+Subscribe telemetry ของบอร์ดเดียว:
+smartfarm/ESP32-FARM-001-NATTAPHOL-PALM/telemetry
+
+Subscribe status ของทุกบอร์ด:
+smartfarm/+/status
+
+Publish คำสั่งไปยังบอร์ดเดียว:
+smartfarm/ESP32-FARM-001-NATTAPHOL-PALM/control
+```
+
 ### สรุป Topics ทั้งหมด
 
 | Topic | ทิศทาง | QoS | Retain | Trigger |
 |---|---|---|---|---|
-| `smartfarm/{id}/telemetry` | ESP32 → Dashboard | 0 | false | ทุก 10s + หลัง relay_control |
+| `smartfarm/{id}/telemetry` | ESP32 → Dashboard | 0 | false | ทุก 5s + หลัง relay_control |
 | `smartfarm/{id}/status` | ESP32 → Dashboard | 1 | **true** | ทุก 30s + connect + LWT |
 | `smartfarm/{id}/control` | Dashboard → ESP32 | 1 | false | on-demand |
 
@@ -342,7 +372,7 @@ smartfarm/+/status
 |---|---|
 | Topic | `smartfarm/{board_id}/telemetry` |
 | Direction | ESP32 → Dashboard |
-| Trigger | ทุก 10,000 ms **และ** ทันทีหลังรับคำสั่ง `relay_control` |
+| Trigger | ทุก 5,000 ms **และ** ทันทีหลังรับคำสั่ง `relay_control` |
 | QoS | 0 |
 | Retain | false |
 
@@ -350,13 +380,15 @@ smartfarm/+/status
 
 ```json
 {
-  "board_id": "ESP32-FARM-001",
+  "board_id": "ESP32-FARM-001-NATTAPHOL-PALM",
   "timestamp": 123456,
   "rssi": -65,
   "sensors": {
     "water_temp": 28.5,
     "air_temp": 32.1,
-    "air_humidity": 65.0
+    "air_humidity": 65.0,
+    "water_overflow": false,
+    "water_dry": false
   },
   "relays": {
     "relay1_pump": false,
@@ -376,9 +408,33 @@ smartfarm/+/status
 | `sensors.water_temp` | float | °C | อาจ **ไม่มี key** ถ้า DS18B20 error |
 | `sensors.air_temp` | float | °C | อาจ **ไม่มี key** ถ้า Modbus error |
 | `sensors.air_humidity` | float | % | อาจ **ไม่มี key** ถ้า Modbus error |
+| `sensors.water_overflow` | boolean | - | `true` = น้ำล้น |
+| `sensors.water_dry` | boolean | - | `true` = น้ำแห้ง/น้ำต่ำ |
 | `relays.relay1_pump` | boolean | - | true = ปั๊มทำงาน |
 | `relays.relay2_fan` | boolean | - | true = พัดลมทำงาน |
 | `relays.relay3_heater` | boolean | - | true = ฮีตเตอร์ทำงาน |
+
+**ตัวอย่าง Telemetry เมื่อระดับน้ำผิดปกติ:**
+
+```json
+{
+  "board_id": "ESP32-FARM-001-NATTAPHOL-PALM",
+  "timestamp": 128991,
+  "rssi": -58,
+  "sensors": {
+    "water_temp": 27.8,
+    "air_temp": 31.4,
+    "air_humidity": 68.2,
+    "water_overflow": true,
+    "water_dry": false
+  },
+  "relays": {
+    "relay1_pump": false,
+    "relay2_fan": true,
+    "relay3_heater": false
+  }
+}
+```
 
 ---
 
@@ -396,7 +452,7 @@ smartfarm/+/status
 
 ```json
 {
-  "board_id": "ESP32-FARM-001",
+  "board_id": "ESP32-FARM-001-NATTAPHOL-PALM",
   "status": "online",
   "ip": "192.168.1.100",
   "firmware": "1.0.0",
@@ -409,7 +465,7 @@ smartfarm/+/status
 
 ```json
 {
-  "board_id": "ESP32-FARM-001",
+  "board_id": "ESP32-FARM-001-NATTAPHOL-PALM",
   "status": "offline",
   "timestamp": 3600123
 }
@@ -451,7 +507,7 @@ smartfarm/+/status
 ```
 
 - ส่งเฉพาะ relay ที่ต้องการเปลี่ยนได้ (partial update — ไม่จำเป็นต้องส่งครบ 3 ตัว)
-- ESP32 ตอบกลับด้วย **Telemetry ทันที** พร้อม relay state ล่าสุด (ไม่รอ interval 10 วิ)
+- ESP32 ตอบกลับด้วย **Telemetry ทันที** พร้อม relay state ล่าสุด (ไม่รอรอบปกติ 5 วินาที)
 - `true` = relay ทำงาน (ON), `false` = relay หยุด (OFF)
 
 **Command: reboot**
@@ -486,7 +542,7 @@ smartfarm/+/status
 ┌────────────────────────────────────┐
 │ SmartFarm          W:OK  M:OK      │  y=0   (status header, font1)
 ├────────────────────────────────────┤  y=9   (horizontal divider)
-│ H2O  28.5C                         │  y=11  (water temp, font2 = 12×16px)
+│ H2O  28.5C      OF:0 DR:0          │  y=11  (water temp + level state)
 │ Air:32.1C       Hum:65%            │  y=29  (air temp + humidity, font1)
 ├────────────────────────────────────┤  y=38  (horizontal divider)
 │  ┌──────┐  ┌──────┐  ┌──────┐     │
@@ -500,6 +556,7 @@ smartfarm/+/status
 |---|---|
 | `W:OK` / `W:--` | WiFi connected / disconnected |
 | `M:OK` / `M:--` | MQTT connected / disconnected |
+| `OF:1` / `DR:1` | Overflow / Dry sensor active |
 | Relay **ON** | filled white box + black text |
 | Relay **OFF** | empty outline + white text |
 | `---C` / `--%` | แสดงเมื่อ sensor invalid |
@@ -510,14 +567,14 @@ smartfarm/+/status
 
 | Event | Interval | รายละเอียด |
 |---|---|---|
-| `sensorsRead()` + `mqttPublishTelemetry()` | 10,000 ms | อ่าน sensor + publish MQTT |
+| `sensorsRead()` + `mqttPublishTelemetry()` | 5,000 ms | อ่าน sensor + publish MQTT |
 | `displayUpdate()` | 2,000 ms | อัปเดต OLED |
 | `mqttPublishStatus("online")` | 30,000 ms | Heartbeat |
 | WiFi reconnect | 5,000 ms | เมื่อ WiFi หลุด |
 | MQTT reconnect | 5,000 ms | เมื่อ MQTT หลุด (WiFi ยังอยู่) |
 
 > `delay(400)` ใน `sensorsRead()` รอ DS18B20 conversion (11-bit = 375ms)  
-> → ทำให้ loop หยุด 400ms ทุกรอบที่อ่าน sensor (ทุก 10 วินาที)
+> → ทำให้ loop หยุด 400ms ทุกรอบที่อ่าน sensor (ทุก 5 วินาที)
 
 ---
 
@@ -538,6 +595,7 @@ smartfarm/+/status
 
 - ใช้ `esp_random()` สุ่มค่า ทศนิยม 1 ตำแหน่ง
 - Dashboard ไม่ต้องแยก simulated / real data — format payload เหมือนกันทุกอย่าง
+- Water Overflow / Water Dry ไม่ถูกจำลอง ยังคงอ่านจาก digital input จริงเสมอ
 
 ---
 
@@ -547,7 +605,7 @@ smartfarm/+/status
 
 ```c
 // Board Identity
-#define BOARD_ID      "ESP32-FARM-001"   // ต้องตรงกับ boardId ใน Django
+#define BOARD_ID      "ESP32-FARM-001-NATTAPHOL-PALM"   // ต้องตรงกับ boardId ใน Django
 
 // WiFi
 #define WIFI_SSID       "your-wifi-ssid"
@@ -558,6 +616,11 @@ smartfarm/+/status
 #define MQTT_PORT       1883
 #define MQTT_USER       ""
 #define MQTT_PASS       ""
+
+// Level sensors
+#define PIN_LEVEL_OVERFLOW 33
+#define PIN_LEVEL_DRY      27
+#define LEVEL_SENSOR_ACTIVE_HIGH false
 
 // Sensor Simulation (comment ออกเมื่อ sensor พร้อม)
 #define SIMULATE_SENSORS
@@ -640,6 +703,8 @@ class TelemetryLog(models.Model):
     water_temp    = models.FloatField(null=True, blank=True)    # °C
     air_temp      = models.FloatField(null=True, blank=True)    # °C
     air_humidity  = models.FloatField(null=True, blank=True)    # %
+    water_overflow = models.BooleanField(default=False)
+    water_dry      = models.BooleanField(default=False)
     rssi          = models.IntegerField(null=True, blank=True)  # dBm
 
     # Relay states
@@ -718,6 +783,8 @@ def on_message(client, userdata, msg):
             water_temp    = sensors.get("water_temp"),
             air_temp      = sensors.get("air_temp"),
             air_humidity  = sensors.get("air_humidity"),
+            water_overflow = sensors.get("water_overflow", False),
+            water_dry      = sensors.get("water_dry", False),
             rssi          = payload.get("rssi"),
             relay1_pump   = relays.get("relay1_pump", False),
             relay2_fan    = relays.get("relay2_fan", False),
@@ -736,6 +803,8 @@ def on_message(client, userdata, msg):
             "water_temp":    log.water_temp,
             "air_temp":      log.air_temp,
             "air_humidity":  log.air_humidity,
+            "water_overflow": log.water_overflow,
+            "water_dry":      log.water_dry,
             "rssi":          log.rssi,
             "relay1_pump":   log.relay1_pump,
             "relay2_fan":    log.relay2_fan,
@@ -833,6 +902,8 @@ GET  /api/boards/{board_id}/telemetry/
            "water_temp": 28.5,
            "air_temp": 32.1,
            "air_humidity": 65.0,
+           "water_overflow": false,
+           "water_dry": false,
            "rssi": -65,
            "relay1_pump": false,
            "relay2_fan": true,
@@ -943,19 +1014,21 @@ websocket_urlpatterns = [
 ]
 ```
 
-**WebSocket URL:** `ws://localhost:8000/ws/boards/ESP32-FARM-001/`
+**WebSocket URL:** `ws://localhost:8000/ws/boards/ESP32-FARM-001-NATTAPHOL-PALM/`
 
 **Messages ที่ Browser จะได้รับ:**
 
 ```json
-// Telemetry (ทุก 10 วินาที)
+// Telemetry (ทุก 5 วินาที)
 {
   "type": "telemetry",
-  "board_id": "ESP32-FARM-001",
+  "board_id": "ESP32-FARM-001-NATTAPHOL-PALM",
   "received_at": "2024-01-01T12:00:00Z",
   "water_temp": 28.5,
   "air_temp": 32.1,
   "air_humidity": 65.0,
+  "water_overflow": false,
+  "water_dry": false,
   "rssi": -65,
   "relay1_pump": false,
   "relay2_fan": true,
@@ -965,7 +1038,7 @@ websocket_urlpatterns = [
 // Status (เมื่อ board online/offline)
 {
   "type": "status",
-  "board_id": "ESP32-FARM-001",
+  "board_id": "ESP32-FARM-001-NATTAPHOL-PALM",
   "is_online": true,
   "uptime": 3600
 }
@@ -1034,7 +1107,7 @@ MQTT_PASSWORD=
 REDIS_URL=redis://localhost:6379/0
 
 # Default Board (ถ้ามี board เดียว)
-DEFAULT_BOARD_ID=ESP32-FARM-001
+DEFAULT_BOARD_ID=ESP32-FARM-001-NATTAPHOL-PALM
 ```
 
 ---
@@ -1047,22 +1120,24 @@ DEFAULT_BOARD_ID=ESP32-FARM-001
 
 | Topic | Direction | QoS | Retain | Interval |
 |---|---|---|---|---|
-| `smartfarm/{id}/telemetry` | ESP32 → Dashboard | 0 | false | 10s |
+| `smartfarm/{id}/telemetry` | ESP32 → Dashboard | 0 | false | 5s |
 | `smartfarm/{id}/status` | ESP32 → Dashboard | 1 | **true** | 30s |
 | `smartfarm/{id}/control` | Dashboard → ESP32 | 1 | false | on-demand |
 
 ### Full Payload Reference
 
 ```
-─── PUBLISH: smartfarm/ESP32-FARM-001/telemetry ───────────────────
+─── PUBLISH: smartfarm/ESP32-FARM-001-NATTAPHOL-PALM/telemetry ────
 {
-  "board_id":  "ESP32-FARM-001",
+  "board_id":  "ESP32-FARM-001-NATTAPHOL-PALM",
   "timestamp": <millis: integer>,
   "rssi":      <dBm: integer>,
   "sensors": {
     "water_temp":   <float °C>,      // optional — ไม่มีถ้า sensor error
     "air_temp":     <float °C>,      // optional — ไม่มีถ้า sensor error
-    "air_humidity": <float %>        // optional — ไม่มีถ้า sensor error
+    "air_humidity": <float %>,       // optional — ไม่มีถ้า sensor error
+    "water_overflow": <bool>,        // true = น้ำล้น
+    "water_dry":      <bool>         // true = น้ำแห้ง/น้ำต่ำ
   },
   "relays": {
     "relay1_pump":   <bool>,         // Water Pump
@@ -1071,9 +1146,9 @@ DEFAULT_BOARD_ID=ESP32-FARM-001
   }
 }
 
-─── PUBLISH: smartfarm/ESP32-FARM-001/status (retain=true) ────────
+─── PUBLISH: smartfarm/ESP32-FARM-001-NATTAPHOL-PALM/status (retain=true) ────────
 {
-  "board_id":  "ESP32-FARM-001",
+  "board_id":  "ESP32-FARM-001-NATTAPHOL-PALM",
   "status":    "online" | "offline",
   "ip":        "<ip-address>",       // ไม่มีใน LWT
   "firmware":  "1.0.0",             // ไม่มีใน LWT
@@ -1081,7 +1156,7 @@ DEFAULT_BOARD_ID=ESP32-FARM-001
   "timestamp": <millis: integer>
 }
 
-─── SUBSCRIBE: smartfarm/ESP32-FARM-001/control ───────────────────
+─── SUBSCRIBE: smartfarm/ESP32-FARM-001-NATTAPHOL-PALM/control ────
 // สั่ง relay
 {
   "command": "relay_control",
@@ -1114,6 +1189,8 @@ def parse_telemetry(raw_payload: bytes) -> dict:
         "water_temp":    sensors.get("water_temp"),    # None ถ้า sensor error
         "air_temp":      sensors.get("air_temp"),
         "air_humidity":  sensors.get("air_humidity"),
+        "water_overflow": sensors.get("water_overflow", False),
+        "water_dry":      sensors.get("water_dry", False),
         "relay1_pump":   relays.get("relay1_pump", False),
         "relay2_fan":    relays.get("relay2_fan", False),
         "relay3_heater": relays.get("relay3_heater", False),
@@ -1160,11 +1237,11 @@ MQTT Explorer เป็น GUI tool สำหรับ monitor และ publish
    smartfarm/#
    ```
 2. คลิก **Subscribe** (หรือ Enter)
-3. เปิด ESP32 → ใน 10 วินาทีจะเห็น message ปรากฏใต้:
+3. เปิด ESP32 → ภายในประมาณ 5 วินาทีจะเห็น message ปรากฏใต้:
    ```
    smartfarm/
-   └── ESP32-FARM-001/
-       ├── telemetry    ← sensor + relay state (ทุก 10s)
+     └── ESP32-FARM-001-NATTAPHOL-PALM/
+       ├── telemetry    ← sensor + water level + relay state (ทุก 5s)
        └── status       ← online/offline (ทุก 30s, retained)
    ```
 4. คลิก topic `telemetry` → ดู payload JSON ใน panel ขวามือ
@@ -1172,13 +1249,15 @@ MQTT Explorer เป็น GUI tool สำหรับ monitor และ publish
 **ตัวอย่าง payload ที่ควรเห็น:**
 ```json
 {
-  "board_id": "ESP32-FARM-001",
+  "board_id": "ESP32-FARM-001-NATTAPHOL-PALM",
   "timestamp": 12450,
   "rssi": -62,
   "sensors": {
     "water_temp": 28.5,
     "air_temp": 32.1,
-    "air_humidity": 65.0
+    "air_humidity": 65.0,
+    "water_overflow": false,
+    "water_dry": false
   },
   "relays": {
     "relay1_pump": false,
@@ -1194,7 +1273,7 @@ MQTT Explorer เป็น GUI tool สำหรับ monitor และ publish
 
 1. ในช่อง **Publish** (panel ล่างขวา) กรอก topic:
    ```
-   smartfarm/ESP32-FARM-001/control
+  smartfarm/ESP32-FARM-001-NATTAPHOL-PALM/control
    ```
 2. เลือก **QoS 1**
 3. วาง payload JSON ในกล่องข้อความ แล้วคลิก **Publish**
@@ -1241,7 +1320,7 @@ MQTT Explorer เป็น GUI tool สำหรับ monitor และ publish
   "command": "ping"
 }
 ```
-ESP32 ตอบกลับด้วย status `"online"` ใน topic `smartfarm/ESP32-FARM-001/status`
+ESP32 ตอบกลับด้วย status `"online"` ใน topic `smartfarm/ESP32-FARM-001-NATTAPHOL-PALM/status`
 
 ---
 
@@ -1266,14 +1345,15 @@ ESP32 ตอบกลับด้วย status `"online"` ใน topic `smartfar
 | # | การทดสอบ | วิธีตรวจสอบ |
 |---|---|---|
 | 1 | ESP32 connect broker | เห็น `status: "online"` ใน MQTT Explorer |
-| 2 | Telemetry มาทุก 10s | topic `telemetry` update สม่ำเสมอ |
+| 2 | Telemetry มาทุก 5s | topic `telemetry` update สม่ำเสมอ |
 | 3 | Sensor data ถูกต้อง | ค่า `water_temp`, `air_temp`, `air_humidity` สมเหตุสมผล |
-| 4 | RSSI อยู่ในช่วงปกติ | ค่า `rssi` ระหว่าง -80 ถึง -40 dBm |
-| 5 | Relay สั่งจาก Dashboard | Publish control → relay state เปลี่ยนใน telemetry ถัดไป |
-| 6 | Partial relay update | ส่งเฉพาะ `relay1_pump` → relay อื่นไม่เปลี่ยน |
-| 7 | Ping response | ส่ง `ping` → ได้ `status: "online"` กลับมา |
-| 8 | LWT (ถอด WiFi) | ตัด WiFi ESP32 → broker ส่ง `status: "offline"` อัตโนมัติ |
-| 9 | Reconnect หลังหลุด WiFi | ต่อ WiFi กลับ → ESP32 reconnect และ publish `online` อีกครั้ง |
+| 4 | Level sensor state ถูกต้อง | ค่า `water_overflow`, `water_dry` เปลี่ยนตามสถานะจริง |
+| 5 | RSSI อยู่ในช่วงปกติ | ค่า `rssi` ระหว่าง -80 ถึง -40 dBm |
+| 6 | Relay สั่งจาก Dashboard | Publish control → relay state เปลี่ยนใน telemetry ถัดไป |
+| 7 | Partial relay update | ส่งเฉพาะ `relay1_pump` → relay อื่นไม่เปลี่ยน |
+| 8 | Ping response | ส่ง `ping` → ได้ `status: "online"` กลับมา |
+| 9 | LWT (ถอด WiFi) | ตัด WiFi ESP32 → broker ส่ง `status: "offline"` อัตโนมัติ |
+| 10 | Reconnect หลังหลุด WiFi | ต่อ WiFi กลับ → ESP32 reconnect และ publish `online` อีกครั้ง |
 
 ---
 
