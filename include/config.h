@@ -41,6 +41,10 @@
 #define PIN_RELAY2_FAN     16
 #define PIN_RELAY3_HEATER  4
 
+// Level Sensors (Opto Isolate, Active LOW)
+#define PIN_LEVEL_OVERFLOW 33 //iso1
+#define PIN_LEVEL_DRY      27 //iso2
+
 // ==================== Modbus (XY-MD03) ====================
 #define MODBUS_SLAVE_ADDR  0x01
 #define MODBUS_BAUD        9600
@@ -49,6 +53,11 @@
 // false = Active LOW (relay module ทั่วไปที่มี optocoupler)
 // true  = Active HIGH
 #define RELAY_ACTIVE_HIGH  false
+
+// ==================== Level Sensor Logic ====================
+// false = Active LOW ผ่าน opto isolate
+// true  = Active HIGH
+#define LEVEL_SENSOR_ACTIVE_HIGH false
 
 // ==================== OLED SSD1306 (I2C) ====================
 #define PIN_OLED_SDA   21

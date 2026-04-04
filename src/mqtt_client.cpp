@@ -123,6 +123,8 @@ void mqttPublishTelemetry(const SensorData& s) {
   if (s.waterTempValid)    sensors["water_temp"]   = roundf(s.waterTemp   * 10) / 10.0f;
   if (s.airTempValid)      sensors["air_temp"]     = roundf(s.airTemp     * 10) / 10.0f;
   if (s.airHumidityValid)  sensors["air_humidity"] = roundf(s.airHumidity * 10) / 10.0f;
+  sensors["water_overflow"] = s.waterOverflow;
+  sensors["water_dry"]      = s.waterDry;
 
   JsonObject relays = doc["relays"].to<JsonObject>();
   relays["relay1_pump"]    = relayGet(1);

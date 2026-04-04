@@ -15,7 +15,15 @@ static OneWire           oneWire(PIN_ONE_WIRE);
 static DallasTemperature ds18b20(&oneWire);
 static ModbusMaster      modbus;
 
+static bool readActiveLevel(uint8_t pin) {
+  int raw = digitalRead(pin);
+  return LEVEL_SENSOR_ACTIVE_HIGH ? (raw == HIGH) : (raw == LOW);
+}
+
 void sensorsInit() {
+  pinMode(PIN_LEVEL_OVERFLOW, INPUT_PULLUP);
+  pinMode(PIN_LEVEL_DRY, INPUT_PULLUP);
+
   // DS18B20
   ds18b20.begin();
   ds18b20.setResolution(11);          // 11-bit (~375ms conversion)
@@ -29,6 +37,9 @@ void sensorsInit() {
 
 SensorData sensorsRead() {
   SensorData data = {};
+
+  data.waterOverflow = readActiveLevel(PIN_LEVEL_OVERFLOW);
+  data.waterDry      = readActiveLevel(PIN_LEVEL_DRY);
 
   // ---- DS18B20 : Water Temperature ----
   ds18b20.requestTemperatures();
