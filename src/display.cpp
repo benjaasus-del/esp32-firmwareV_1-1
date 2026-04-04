@@ -98,13 +98,13 @@ void displayUpdate(const SensorData& data, bool wifiOk, bool mqttOk) {
 
   oled.drawFastHLine(0, 9, 128, SSD1306_WHITE);
 
-  // ── Water Temperature (font2) ────────────────────────────────
+  // ── Water Temperature (font1) ────────────────────────────────
   oled.setTextSize(1);
   oled.setCursor(0, 14);
   oled.print("H2O");
 
-  oled.setTextSize(2);
-  oled.setCursor(24, 11);
+  oled.setTextSize(1);
+  oled.setCursor(24, 14);
   if (data.waterTempValid) {
     oled.printf("%.1fC", data.waterTemp);
   } else {
