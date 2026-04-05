@@ -81,7 +81,7 @@
 #define SIM_HUMIDITY_MAX    90.0f
 
 // ==================== Timing ====================
-#define TELEMETRY_INTERVAL_MS  5000   // ส่ง sensor data ทุก 5 วินาที
+#define TELEMETRY_INTERVAL_MS  10000   // ส่ง sensor data ทุก 5 วินาที
 #define DISPLAY_INTERVAL_MS    2000    // อัปเดตหน้าจอทุก 2 วินาที
 #define STATUS_INTERVAL_MS     30000   // ส่ง heartbeat ทุก 30 วินาที
 #define RECONNECT_INTERVAL_MS  5000    // ลอง reconnect WiFi/MQTT ทุก 5 วินาที
