@@ -5,23 +5,7 @@
 #include "relay_control.h"
 #include "mqtt_client.h"
 #include "display.h"
-
-// ==================== WiFi ====================
-static void wifiConnect() {
-  if (WiFi.status() == WL_CONNECTED) return;
-
-  WiFi.mode(WIFI_STA);
-  WiFi.begin(WIFI_SSID, WIFI_PASSWORD);
-
-  uint32_t start = millis();
-  while (WiFi.status() != WL_CONNECTED && millis() - start < WIFI_TIMEOUT_MS) {
-    delay(500);
-  }
-
-  if (WiFi.status() != WL_CONNECTED) {
-    WiFi.disconnect();
-  }
-}
+#include "wifi_manager.h"
 
 // ==================== Setup ====================
 void setup() {
@@ -30,10 +14,14 @@ void setup() {
 
   relayInit();
   displayInit();
-  sensorsInit();
-  wifiConnect();
 
-  if (WiFi.status() == WL_CONNECTED) {
+  // ตรวจ SW1 ก่อนทำอะไร: กดค้าง 5 วินาที → reset WiFi credential
+  wifiManagerCheckReset();
+
+  sensorsInit();
+
+  // connect WiFi (auto หรือ portal)
+  if (wifiManagerConnect()) {
     displayShowIP(WiFi.localIP().toString().c_str());
     delay(2000);
     mqttSetup();
@@ -56,7 +44,7 @@ void loop() {
   if (!wifiOk) {
     if (now - lastReconnect >= RECONNECT_INTERVAL_MS) {
       lastReconnect = now;
-      wifiConnect();
+      wifiManagerReconnect();
     }
     if (now - lastDisplay >= DISPLAY_INTERVAL_MS) {
       lastDisplay = now;

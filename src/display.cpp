@@ -83,6 +83,80 @@ void displayShowIP(const char* ip) {
   oled.display();
 }
 
+// ================================================================
+//  WiFi Manager Screens
+// ================================================================
+
+void displayWifiConnecting() {
+  if (!oledReady) return;
+  oled.clearDisplay();
+  oled.setTextSize(1);
+  oled.setTextColor(SSD1306_WHITE);
+  oled.setCursor(0, 0);
+  oled.print("SmartFarm");
+  oled.drawFastHLine(0, 9, 128, SSD1306_WHITE);
+  oled.setCursor(10, 24);
+  oled.print("Connecting WiFi");
+  oled.setCursor(28, 36);
+  oled.print("Please wait...");
+  oled.display();
+}
+
+void displayWifiResetCountdown(int secRemaining) {
+  if (!oledReady) return;
+  oled.clearDisplay();
+  oled.setTextSize(1);
+  oled.setTextColor(SSD1306_WHITE);
+  oled.setCursor(0, 0);
+  oled.print("SmartFarm");
+  oled.drawFastHLine(0, 9, 128, SSD1306_WHITE);
+  oled.setCursor(4, 16);
+  oled.print("Hold SW1 to Reset");
+  oled.setCursor(4, 28);
+  oled.print("WiFi Settings...");
+  // big countdown number
+  oled.setTextSize(3);
+  oled.setCursor(56, 40);
+  oled.print(secRemaining);
+  oled.display();
+}
+
+void displayWifiResetDone() {
+  if (!oledReady) return;
+  oled.clearDisplay();
+  oled.setTextSize(1);
+  oled.setTextColor(SSD1306_WHITE);
+  oled.setCursor(0, 0);
+  oled.print("SmartFarm");
+  oled.drawFastHLine(0, 9, 128, SSD1306_WHITE);
+  oled.setCursor(16, 22);
+  oled.print("WiFi Reset Done!");
+  oled.setCursor(4, 36);
+  oled.print("Open portal to");
+  oled.setCursor(4, 46);
+  oled.print("reconfigure WiFi");
+  oled.display();
+}
+
+void displayWifiPortal(const char* apSsid) {
+  if (!oledReady) return;
+  oled.clearDisplay();
+  oled.setTextSize(1);
+  oled.setTextColor(SSD1306_WHITE);
+  oled.setCursor(0, 0);
+  oled.print("SmartFarm");
+  oled.drawFastHLine(0, 9, 128, SSD1306_WHITE);
+  oled.setCursor(12, 14);
+  oled.print("WiFi Config Mode");
+  oled.setCursor(0, 28);
+  oled.print("Connect to AP:");
+  oled.setCursor(0, 40);
+  oled.print(apSsid);
+  oled.setCursor(0, 52);
+  oled.print("192.168.4.1");
+  oled.display();
+}
+
 void displayUpdate(const SensorData& data, bool wifiOk, bool mqttOk) {
   if (!oledReady) return;
   oled.clearDisplay();

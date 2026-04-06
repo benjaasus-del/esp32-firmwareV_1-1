@@ -10,9 +10,11 @@
 #define FIRMWARE_VER  "1.0.0"
 
 // ==================== WiFi ====================
-#define WIFI_SSID       "MyHome_2.4G"  // เปลี่ยนเป็น SSID ของ WiFi ที่จะเชื่อมต่อ
-#define WIFI_PASSWORD   "0939391546"
-#define WIFI_TIMEOUT_MS 15000
+// SSID/Password บันทึกใน NVS โดย WiFiManager — ไม่ต้อง hardcode ที่นี่
+#define WIFI_TIMEOUT_MS        15000   // ms รอ connect ก่อน fallback portal
+#define WIFI_PORTAL_SSID       "SmartFarm-Setup"
+#define WIFI_PORTAL_TIMEOUT_S  180     // วินาที portal ก่อน reboot อัตโนมัติ
+#define WIFI_RESET_HOLD_MS     5000    // ms กด SW1 ค้างเพื่อ reset WiFi
 
 // ==================== MQTT Broker ====================
 #define MQTT_BROKER     "broker.hivemq.com"  // HiveMQ Public Free Broker
@@ -45,6 +47,11 @@
 #define PIN_LEVEL_OVERFLOW 33 //iso1
 #define PIN_LEVEL_DRY      27 //iso2
 
+// Toggle Switch Inputs (Active LOW, external pull-up 10kΩ)
+#define PIN_SW1            34   // SW1 — Toggle Switch 1
+#define PIN_SW2            35   // SW2 — Toggle Switch 2
+#define PIN_SW3            32   // SW3 — Toggle Switch 3
+
 // ==================== Modbus (XY-MD03) ====================
 #define MODBUS_SLAVE_ADDR  0x01
 #define MODBUS_BAUD        9600
@@ -58,6 +65,11 @@
 // false = Active LOW ผ่าน opto isolate
 // true  = Active HIGH
 #define LEVEL_SENSOR_ACTIVE_HIGH false
+
+// ==================== Toggle Switch Logic ====================
+// Active LOW — มี external pull-up 10kΩ, กด = GND = LOW
+// GPIO 34, 35 เป็น input-only (ไม่มี internal pull-up/down)
+#define SW_ACTIVE_HIGH false
 
 // ==================== OLED SSD1306 (I2C) ====================
 #define PIN_OLED_SDA   21
