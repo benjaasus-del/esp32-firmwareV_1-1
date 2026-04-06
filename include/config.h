@@ -10,7 +10,7 @@
 #define FIRMWARE_VER  "1.0.0"
 
 // ==================== WiFi ====================
-#define WIFI_SSID       "myHome_2.4GHz"  // เปลี่ยนเป็น SSID ของ WiFi ที่จะเชื่อมต่อ
+#define WIFI_SSID       "MyHome_2.4G"  // เปลี่ยนเป็น SSID ของ WiFi ที่จะเชื่อมต่อ
 #define WIFI_PASSWORD   "0939391546"
 #define WIFI_TIMEOUT_MS 15000
 
