@@ -6,7 +6,7 @@
 // ================================================================
 
 // ==================== Board Identity ====================
-#define BOARD_ID      "ESP32-FARM-001-NATTAPHOL-PALM"   // ต้องตรงกับ boardId ที่ register ใน backend
+#define BOARD_ID      "ESP32-FARM-001-BENJA-BENZ"   // ต้องตรงกับ boardId ที่ register ใน backend
 #define FIRMWARE_VER  "1.0.0"
 
 // ==================== WiFi ====================
@@ -24,7 +24,7 @@
 #define MQTT_KEEPALIVE  60               // seconds
 
 // MQTT Topics (auto-generated จาก BOARD_ID)
-#define TOPIC_TELEMETRY  "smartfarm/" BOARD_ID "/telemetry"
+#define TOPIC_TELEMETRY  "smartfarm/" BOARD_ID"/telemetry"
 #define TOPIC_STATUS     "smartfarm/" BOARD_ID "/status"
 #define TOPIC_CONTROL    "smartfarm/" BOARD_ID "/control"
 
