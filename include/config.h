@@ -6,7 +6,7 @@
 // ================================================================
 
 // ==================== Board Identity ====================
-#define BOARD_ID      "ESP32-FARM-001-NATTAPHOL-PALM"   // ต้องตรงกับ boardId ที่ register ใน backend
+#define BOARD_ID      "ESP32-FARM-001-Benja-Benz"   // ต้องตรงกับ boardId ที่ register ใน backend
 #define FIRMWARE_VER  "1.0.0"
 
 // ==================== WiFi ====================
